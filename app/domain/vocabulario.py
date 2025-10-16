@@ -1,5 +1,5 @@
 VOCABULARIO = {
-    "arepa": "arepa",
+    "arepa": "arep",
     "berraco": "berrac",
     "boleta": "boleta",
     "cacharrear": "cacharr",
@@ -11,7 +11,7 @@ VOCABULARIO = {
     "desparchado": "desparch",
     "embolatar": "embolat",
     "jartar": "jart",
-    "joda": "jod",
+    "joda": "joda",
     "mamera": "mamer",
     "mamón": "mamón",
     "ñero": "ñer",

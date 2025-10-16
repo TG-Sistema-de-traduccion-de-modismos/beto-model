@@ -11,18 +11,18 @@ analyzer = BETOModismosAnalyzer()
 
 @router.on_event("startup")
 def startup_event():
-    logger.info("🚀 Iniciando BETO Model Service (GPU)...")
+    logger.info("Iniciando BETO Model Service (GPU)...")
     analyzer.load_model()
     logger.info(f"Modelo cargado: {analyzer.is_loaded}")
     if torch.cuda.is_available():
-        logger.info(f"🎮 GPU detectada: {torch.cuda.get_device_name(0)}")
+        logger.info(f"GPU detectada: {torch.cuda.get_device_name(0)}")
     else:
-        logger.warning("⚠️ GPU no disponible, usando CPU")
+        logger.warning("GPU no disponible, usando CPU")
 
 
 @router.get("/health")
 def health_check():
-    logger.info("🩺 Health check solicitado en modelo.")
+    logger.info("Health check solicitado en modelo.")
     return {
         "status": "healthy",
         "model_loaded": analyzer.is_loaded,
