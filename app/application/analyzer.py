@@ -13,8 +13,14 @@ import torch.nn.functional as F
 
 
 def quitar_tildes(s: str) -> str:
-    return ''.join(c for c in unicodedata.normalize('NFD', s)
-                   if unicodedata.category(c) != 'Mn')
+    s_protegido = s.replace('ñ', '\x00ENIE_MINUSCULA\x00').replace('Ñ', '\x00ENIE_MAYUSCULA\x00')
+    
+    nfd = unicodedata.normalize('NFD', s_protegido)
+    sin_tildes = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    
+    resultado = sin_tildes.replace('\x00ENIE_MINUSCULA\x00', 'ñ').replace('\x00ENIE_MAYUSCULA\x00', 'Ñ')
+    
+    return resultado
 
 
 class BETOModismosAnalyzer:
@@ -58,23 +64,21 @@ class BETOModismosAnalyzer:
             self.label_encoder.fit(unique_labels)
             logger.info(f"LabelEncoder configurado con {len(unique_labels)} clases.")
 
-            # Imprimir todas las clases
-            logger.info("Clases detectadas por el modelo:")
-            for i, clase in enumerate(self.label_encoder.classes_, start=1):
-                logger.info(f"{i}: {clase}")
-
         except FileNotFoundError:
             logger.warning("dataset.json no encontrado, usando clases por defecto.")
             fallback_classes = [
-                'comida', 'lenguaje', 'malo', 'nada', 'ordinario', 'salir',
-                'sorpresa', 'trabajo', 'tramite', 'preminente', 'diligencias',
-                'mostrar', 'complicado', 'afinar', 'inacabado', 'acechando',
-                'cotidiano', 'flojo'
+                'aburrido', 'agresión', 'animal', 'cambio', 'coito', 'comer',
+                'comida', 'compañero', 'complicado', 'de mal gusto', 'de suerte',
+                'dedicado', 'difícil', 'diligencia', 'diligencias', 'duro',
+                'enojado', 'extraviar', 'falo', 'falso', 'gentilicio', 'gentilicio_femenino',
+                'hartar', 'individuo torpe ', 'insoportable ', 'joven', 'joven_femenino', 'lenguaje',
+                'lugar', 'malo', 'molestia', 'movimiento', 'movimientos', 'objeto', 'ordinario',
+                'papeleta', 'perder', 'preminente', 'presumir', 'probar', 'riguroso',
+                'salir', 'sartén', 'tarea', 'timar', 'tomar', 'trabajo', 'vagina'
             ]
             self.label_encoder = LabelEncoder()
             self.label_encoder.fit(sorted(fallback_classes))
 
-            # Imprimir clases por defecto
             logger.info("Clases por defecto configuradas:")
             for i, clase in enumerate(self.label_encoder.classes_, start=1):
                 logger.info(f"{i}: {clase}")
@@ -82,40 +86,93 @@ class BETOModismosAnalyzer:
         except Exception as e:
             logger.error(f"Error configurando LabelEncoder: {type(e).__name__}: {e}")
 
-
     def detectar_palabras(self, texto: str):
-        texto_norm = quitar_tildes(texto.lower())
+        texto_lower = texto.lower()
         encontradas = []
-        for palabra, raiz in VOCABULARIO.items():
-            raiz_norm = quitar_tildes(raiz.lower())
-            if re.search(rf"\b{re.escape(raiz_norm)}[a-záéíóúüñ]*\b", texto_norm, re.IGNORECASE):
-                encontradas.append(palabra)
+
+        # Extraer palabras con soporte para ñ y tildes
+        palabras_texto = re.findall(r"\b[a-záéíóúüñ]+\b", texto_lower)
+
+        for palabra_texto in palabras_texto:
+            for palabra, raiz in VOCABULARIO.items():
+                raiz_lower = raiz.lower()
+
+                if palabra_texto.startswith(raiz_lower):
+                    if "ñ" in raiz_lower and "ñ" not in palabra_texto:
+                        continue
+                    encontradas.append(palabra)
+
+                else:
+                    raiz_norm = quitar_tildes(raiz_lower)
+                    palabra_norm = quitar_tildes(palabra_texto)
+                    if palabra_norm.startswith(raiz_norm):
+                        if "ñ" in raiz_lower and "ñ" not in palabra_texto:
+                            continue
+                        encontradas.append(palabra)
+
+        if "vueltas" in encontradas and "vuelta" in encontradas:
+            if re.search(r"\bvueltas\b", texto_lower):
+                encontradas.remove("vuelta")
+            else:
+                encontradas.remove("vueltas")
+
         return encontradas
 
-    def marcar_palabra_objetivo(self, texto: str, palabra: str):
-        raiz = VOCABULARIO.get(palabra)
-        if not raiz:
-            return texto
-        raiz_norm = quitar_tildes(raiz.lower())
-        return re.sub(
-            rf"\b{re.escape(raiz_norm)}[a-záéíóúüñ]*\b",
-            lambda m: f"[TGT] {m.group(0)} [TGT]",
-            texto.lower(),
-            count=1,
-            flags=re.IGNORECASE
-        )
+    def marcar_palabra_objetivo(self, texto: str, palabra_objetivo: str, todas_palabras: list):
+
+        texto_normalizado = quitar_tildes(texto.lower())
+        
+        raices_a_enmascarar = []
+        raiz_objetivo = None
+        
+        for palabra in todas_palabras:
+            raiz = VOCABULARIO.get(palabra)
+            if raiz:
+                raiz_norm = quitar_tildes(raiz.lower())
+                if palabra == palabra_objetivo:
+                    raiz_objetivo = raiz_norm
+                else:
+                    raices_a_enmascarar.append(raiz_norm)
+        
+        texto_enmascarado = texto_normalizado
+        for raiz in raices_a_enmascarar:
+            patron = rf"\b{re.escape(raiz)}[a-záéíóúüñ]*\b"
+            texto_enmascarado = re.sub(patron, "[MASK]", texto_enmascarado)
+        
+        if raiz_objetivo:
+            patron_objetivo = rf"\b{re.escape(raiz_objetivo)}[a-záéíóúüñ]*\b"
+            
+            def reemplazo(match):
+                return f"[TGT] {match.group(0)} [TGT]"
+            
+            resultado = re.sub(patron_objetivo, reemplazo, texto_enmascarado, count=1)
+            
+            if "[TGT]" not in resultado:
+                logger.warning(f"No se marcó '{palabra_objetivo}'. Usando solo la palabra.")
+                return f"[TGT] {raiz_objetivo} [TGT]"
+            
+            logger.debug(f"Texto preparado para '{palabra_objetivo}': {resultado}")
+            return resultado
+        
+        # Fallback: solo la palabra objetivo
+        return f"[TGT] {quitar_tildes(palabra_objetivo.lower())} [TGT]"
 
     def predecir_significado(self, texto_marcado: str):
         if not self.is_loaded:
             raise RuntimeError("El modelo no está cargado.")
 
+        texto_seguro = texto_marcado.encode("utf-8").decode("utf-8")
+
         inputs = self.tokenizer(
-            texto_marcado,
+            texto_seguro,
             return_tensors="pt",
             truncation=True,
             padding=True,
             max_length=128
         ).to(self.device)
+
+        tokens = self.tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
+        logger.debug(f"Tokens enviados al modelo: {tokens}")
 
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -124,6 +181,9 @@ class BETOModismosAnalyzer:
             confianza, pred = torch.max(probs, dim=1)
 
         etiqueta = self.label_encoder.inverse_transform([pred.item()])[0]
+
+        logger.info(f"Predicción -> Etiqueta: '{etiqueta}', Confianza: {confianza.item():.4f}, Texto: {texto_seguro}")
+
         return etiqueta, float(confianza.item())
 
     def analizar_texto(self, texto: str):
@@ -131,6 +191,9 @@ class BETOModismosAnalyzer:
         palabras = self.detectar_palabras(texto)
         analizados = {}
         detalles = []
+
+        logger.info(f"Texto recibido: '{texto}'")
+        logger.info(f"Palabras detectadas para análisis: {palabras}")
 
         if not palabras:
             logger.info("No se detectaron modismos en el texto.")
@@ -146,8 +209,11 @@ class BETOModismosAnalyzer:
 
         for palabra in palabras:
             try:
-                marcado = self.marcar_palabra_objetivo(texto, palabra)
+                logger.debug(f"Analizando palabra: '{palabra}'")
+                # Pasar todas las palabras detectadas para enmascarar correctamente
+                marcado = self.marcar_palabra_objetivo(texto, palabra, palabras)
                 significado, confianza = self.predecir_significado(marcado)
+
                 analizados[palabra] = significado
                 detalles.append({
                     "palabra": palabra,
@@ -155,6 +221,9 @@ class BETOModismosAnalyzer:
                     "contexto": texto,
                     "confianza": str(round(confianza, 3))
                 })
+
+                logger.info(f"'{palabra}' → '{significado}' (confianza={confianza:.3f})")
+
             except Exception as e:
                 logger.error(f"Error analizando '{palabra}': {type(e).__name__}: {e}")
                 analizados[palabra] = f"error: {type(e).__name__}"
@@ -169,17 +238,5 @@ class BETOModismosAnalyzer:
             "total_modismos": len(analizados),
             "timestamp": start_time,
             "tiempo_procesamiento": tiempo_total,
-            "modelo": "BETO-Finetuned"
+            "modelo": "bert-cased-spanish-wsd-finetuned-modismos"
         }
-
-
-# ---------------------- BLOQUE PARA IMPRIMIR LAS CLASES ----------------------
-if __name__ == "__main__":
-    analyzer = BETOModismosAnalyzer()
-    analyzer.load_model()  # carga el modelo y configura LabelEncoder
-
-    # Registrar todas las clases en los logs
-    if analyzer.label_encoder:
-        logger.info("Clases detectadas por el modelo:")
-        for i, clase in enumerate(analyzer.label_encoder.classes_):
-            logger.info(f"{i + 1}: {clase}")
