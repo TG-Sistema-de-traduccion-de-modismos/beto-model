@@ -1,30 +1,50 @@
 # **BETO Model Service**
 
-**Servicio de inferencia para detección y clasificación de modismos en texto.**  
-El modelo es una variante fine‑tuned sobre la base **dccuchile/bert-base-spanish-wwm-cased**; por simplicidad en la documentación se le denominará **"BETO"**.
-
-## **Resumen**
-**BETO** expone endpoints HTTP mínimos para:
-- **cargar** el modelo fine‑tuned,
-- **comprobar el estado** (health),
-- **obtener predicciones** sobre textos que contengan modismos.
-
-Este repositorio contiene únicamente la lógica para **cargar el checkpoint fine‑tuned (basado en dccuchile/bert-base-spanish-wwm-cased)**, realizar inferencia y exponer los endpoints HTTP (FastAPI). El fine‑tuning se realizó para **clasificar exactamente 21 modismos**; la API devuelve únicamente esas clases.
+**Servicio de inferencia para detección y clasificación de modismos en texto.**
 
 ---
 
-## **Modelo y alcance**
-- **Base del modelo:** dccuchile/bert-base-spanish-wwm-cased (BERT cased en español).  
-- **Fine‑tuning:** orientado a identificar el **significado contextual** de modismos en oraciones.  
-- **Clases:** **21 modismos** (cada uno con sus significados posibles).  
-- **Alcance del código:** solo carga el modelo, preprocesa texto, detecta modismos, realiza inferencia y expone `/health` y `/predict`. No incluye entrenamiento.
+## **Resumen**
 
-**Nota:** la imagen Docker resultante pesa aproximadamente **19.4 GB** después del build.
+**BETO Model Service** expone endpoints HTTP mínimos para:
+- **Cargar** el modelo fine‑tuned
+- **Comprobar el estado** (health)
+- **Obtener predicciones** sobre textos que contengan modismos
+
+Este repositorio contiene únicamente la lógica para **cargar el checkpoint fine‑tuned**, realizar inferencia y exponer los endpoints HTTP (FastAPI). El fine‑tuning se realizó para **clasificar exactamente 21 modismos**; la API devuelve únicamente esas clases.
+
+---
+
+## **Modelo y arquitectura**
+
+### **Modelo Base**
+- **Nombre:** BETO (BERT en español)
+- **Repositorio:** [dccuchile/bert-base-spanish-wwm-cased](https://huggingface.co/dccuchile/bert-base-spanish-wwm-cased)
+- **Descripción:** Modelo BERT entrenado en un corpus grande en español utilizando la técnica de Whole Word Masking (WWM). Es de tamaño similar a BERT-Base y supera a Multilingual BERT en varios benchmarks del idioma español.
+
+### **Modelo Fine-tuned**
+- **Nombre:** BETO Fine-tuned para Modismos Bogotanos
+- **Repositorio:** [pescobarg/BETO-finetuned-modismos](https://huggingface.co/pescobarg/BETO-finetuned-modismos)
+- **Descripción:** Versión ajustada específicamente para identificar y clasificar 21 modismos del español bogotano según su significado contextual.
+- **Tarea:** Clasificación multiclase de modismos en contexto
+
+### **Alcance del código**
+Este repositorio solo:
+- Carga el modelo fine‑tuned
+- Preprocesa texto
+- Detecta modismos
+- Realiza inferencia
+- Expone endpoints `/health` y `/predict`
+
+**No incluye el proceso de entrenamiento/fine-tuning.**
 
 ---
 
 ## **Objetivo del fine‑tuning**
-La idea es que BETO sea capaz de identificar **qué significado** tiene un modismo según el contexto de la oración (por ejemplo, distinguir "camello" = trabajo vs "camello" = animal).
+
+El modelo es capaz de identificar **qué significado** tiene un modismo según el contexto de la oración. Por ejemplo, distinguir:
+- "camello" = trabajo vs "camello" = animal
+- "arepa" = suerte vs "arepa" = comida
 
 ---
 
@@ -57,35 +77,46 @@ La idea es que BETO sea capaz de identificar **qué significado** tiene un modis
 ---
 
 ## **Endpoints**
-- **GET /health**  
-  Retorna JSON con: `status`, `model_loaded`, `gpu_available`, `gpu_name`.
-- **POST /predict**  
-  Payload: JSON con el texto a analizar.  
-  Respuesta: JSON con modismos detectados (hasta las 21 clases) y metadatos básicos.
 
-Ejemplo:
+### **GET /health**
+Retorna JSON con: `status`, `model_loaded`, `gpu_available`, `gpu_name`.
+
+**Ejemplo:**
+```sh
+curl -X GET http://localhost:8002/health
+```
+
+### **POST /predict**
+Payload: JSON con el texto a analizar.  
+Respuesta: JSON con modismos detectados (hasta las 21 clases) y metadatos básicos.
+
+**Ejemplo:**
 ```sh
 curl -X POST http://localhost:8002/predict \
   -H "Content-Type: application/json" \
-  -d '{"texto":"Tu frase aquí"}'
+  -d '{"texto":"Tengo mucho camello esta semana"}'
 ```
 
 ---
 
 ## **Docker — build & run usando Dockerfile y GPU**
-Requisitos en host: Docker 19.03+ y **NVIDIA Container Toolkit** (o runtime nvidia legacy). Comandos desde PowerShell o CMD en Windows:
 
-1) Construir la imagen:
+### **Requisitos**
+- Docker 19.03+
+- **NVIDIA Container Toolkit** (o runtime nvidia legacy)
+- GPU compatible (optimizado para RTX 5070)
+
+### **1. Construir la imagen**
 ```sh
 docker build -t beto-model:latest ./beto-model
 ```
-> **Nota:** la imagen resultante pesa aproximadamente **19.4 GB**.
 
+> **Nota:** La imagen resultante pesa aproximadamente **19.4 GB**.
 
-> **Nota:** esta imagen de Docker fue especialmente hecha para su uso con una RTX 5070.
+> **Nota:** Esta imagen de Docker fue especialmente diseñada para su uso con una RTX 5070.
 
-
-2) Ejecutar (opción moderna --gpus, recomendada):
+### **2. Ejecutar el contenedor**
+Opción moderna `--gpus` (recomendada):
 ```sh
 docker run --rm --name beto-model `
   --gpus all `
@@ -95,15 +126,20 @@ docker run --rm --name beto-model `
   -v C:\ruta\al\modelo:/app/model `
   beto-model:latest
 ```
+
 ---
 
 ## **Configuración importante**
-- **Revisa `requirements.txt`** y usa las versiones indicadas (torch, transformers, tokenizers, etc.). Las incompatibilidades entre versiones suelen ser la causa principal de errores en carga o inferencia.  
-- Si usas archivos de configuración o `.env`, **actualiza las IPs/hosts/puertos** en `app/core/config.py` y en `.env` si tu despliegue no usa `localhost` (p. ej. `SERVICE_HOST`, `MODEL_HOST`).  
+
+- **Revisa `requirements.txt`** y usa las versiones indicadas (torch, transformers, tokenizers, etc.). Las incompatibilidades entre versiones suelen ser la causa principal de errores en carga o inferencia.
+- Si usas archivos de configuración o `.env`, **actualiza las IPs/hosts/puertos** en `app/core/config.py` y en `.env` si tu despliegue no usa `localhost` (por ejemplo: `SERVICE_HOST`, `MODEL_HOST`).
+
 ---
 
 ## **Limitaciones y recomendaciones**
-- El repositorio solo **carga** y **sirve** el modelo fine‑tuned; **no incluye** el pipeline de entrenamiento.  
-- Ejecutar en GPU con suficiente VRAM para evitar OOM al cargar modelos grandes.  
-- Montar el checkpoint externamente si quieres reducir el tamaño de la imagen o facilitar actualizaciones sin rebuild.  
+
+- El repositorio solo **carga** y **sirve** el modelo fine‑tuned; **no incluye** el pipeline de entrenamiento.
+- Ejecutar en GPU con suficiente VRAM para evitar errores OOM al cargar modelos grandes.
+- Montar el checkpoint externamente si quieres reducir el tamaño de la imagen o facilitar actualizaciones sin rebuild.
 - Revisar logs (logger) para diagnosticar errores de carga o inferencia.
+
