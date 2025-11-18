@@ -13,6 +13,7 @@ import torch.nn.functional as F
 
 
 def quitar_tildes(s: str) -> str:
+  
     s_protegido = s.replace('ñ', '\x00ENIE_MINUSCULA\x00').replace('Ñ', '\x00ENIE_MAYUSCULA\x00')
     
     nfd = unicodedata.normalize('NFD', s_protegido)
@@ -79,6 +80,7 @@ class BETOModismosAnalyzer:
             self.label_encoder = LabelEncoder()
             self.label_encoder.fit(sorted(fallback_classes))
 
+            # Imprimir clases por defecto
             logger.info("Clases por defecto configuradas:")
             for i, clase in enumerate(self.label_encoder.classes_, start=1):
                 logger.info(f"{i}: {clase}")
@@ -86,11 +88,12 @@ class BETOModismosAnalyzer:
         except Exception as e:
             logger.error(f"Error configurando LabelEncoder: {type(e).__name__}: {e}")
 
+
     def detectar_palabras(self, texto: str):
         texto_lower = texto.lower()
+        texto_norm = quitar_tildes(texto_lower) 
         encontradas = []
 
-        # Extraer palabras con soporte para ñ y tildes
         palabras_texto = re.findall(r"\b[a-záéíóúüñ]+\b", texto_lower)
 
         for palabra_texto in palabras_texto:
@@ -118,44 +121,30 @@ class BETOModismosAnalyzer:
 
         return encontradas
 
-    def marcar_palabra_objetivo(self, texto: str, palabra_objetivo: str, todas_palabras: list):
+
+    def marcar_palabra_objetivo(self, texto: str, palabra: str):
+        raiz = VOCABULARIO.get(palabra)
+        if not raiz:
+            return texto
 
         texto_normalizado = quitar_tildes(texto.lower())
         
-        raices_a_enmascarar = []
-        raiz_objetivo = None
+        raiz_normalizada = quitar_tildes(raiz.lower())
         
-        for palabra in todas_palabras:
-            raiz = VOCABULARIO.get(palabra)
-            if raiz:
-                raiz_norm = quitar_tildes(raiz.lower())
-                if palabra == palabra_objetivo:
-                    raiz_objetivo = raiz_norm
-                else:
-                    raices_a_enmascarar.append(raiz_norm)
+        patron = rf"\b{re.escape(raiz_normalizada)}[a-záéíóúüñ]*\b"
         
-        texto_enmascarado = texto_normalizado
-        for raiz in raices_a_enmascarar:
-            patron = rf"\b{re.escape(raiz)}[a-záéíóúüñ]*\b"
-            texto_enmascarado = re.sub(patron, "[MASK]", texto_enmascarado)
+        def reemplazo(match):
+            return f"[TGT] {match.group(0)} [TGT]"
         
-        if raiz_objetivo:
-            patron_objetivo = rf"\b{re.escape(raiz_objetivo)}[a-záéíóúüñ]*\b"
-            
-            def reemplazo(match):
-                return f"[TGT] {match.group(0)} [TGT]"
-            
-            resultado = re.sub(patron_objetivo, reemplazo, texto_enmascarado, count=1)
-            
-            if "[TGT]" not in resultado:
-                logger.warning(f"No se marcó '{palabra_objetivo}'. Usando solo la palabra.")
-                return f"[TGT] {raiz_objetivo} [TGT]"
-            
-            logger.debug(f"Texto preparado para '{palabra_objetivo}': {resultado}")
-            return resultado
+        resultado = re.sub(patron, reemplazo, texto_normalizado, count=1)
         
-        # Fallback: solo la palabra objetivo
-        return f"[TGT] {quitar_tildes(palabra_objetivo.lower())} [TGT]"
+        if "[TGT]" not in resultado:
+            logger.warning(f"No se marcó '{palabra}' con raíz '{raiz}'. Texto normalizado: {texto_normalizado}")
+            return texto_normalizado
+        
+        logger.debug(f"Palabra '{palabra}' marcada en texto normalizado: {resultado}")
+        
+        return resultado
 
     def predecir_significado(self, texto_marcado: str):
         if not self.is_loaded:
@@ -186,6 +175,7 @@ class BETOModismosAnalyzer:
 
         return etiqueta, float(confianza.item())
 
+
     def analizar_texto(self, texto: str):
         start_time = time.time()
         palabras = self.detectar_palabras(texto)
@@ -210,8 +200,7 @@ class BETOModismosAnalyzer:
         for palabra in palabras:
             try:
                 logger.debug(f"Analizando palabra: '{palabra}'")
-                # Pasar todas las palabras detectadas para enmascarar correctamente
-                marcado = self.marcar_palabra_objetivo(texto, palabra, palabras)
+                marcado = self.marcar_palabra_objetivo(texto, palabra)
                 significado, confianza = self.predecir_significado(marcado)
 
                 analizados[palabra] = significado
